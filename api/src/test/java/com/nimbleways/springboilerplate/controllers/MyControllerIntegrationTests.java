@@ -8,8 +8,7 @@ import com.nimbleways.springboilerplate.services.implementations.NotificationSer
 
 import java.time.Clock;
 import java.util.Arrays;
-import java.util.HashSet;
-import java.util.NoSuchElementException;
+import java.util.LinkedHashSet;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,8 +29,8 @@ import org.springframework.web.util.NestedServletException;
 import static com.nimbleways.springboilerplate.utils.TestClock.FIXED_CLOCK;
 import static com.nimbleways.springboilerplate.utils.TestClock.TODAY;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -150,6 +149,23 @@ class MyControllerIntegrationTests {
     }
 
     @Test
+    void notificationFailureRollsBackPreviouslySavedStock() {
+        Product cable = new Product(null, 15, 3, "NORMAL", "USB Cable", null, null, null);
+        Product expiredMilk = new Product(null, 15, 4, "EXPIRABLE", "Milk", TODAY.minusDays(1), null, null);
+        Order order = saveOrder(cable, expiredMilk);
+        doThrow(new IllegalStateException("Notification unavailable"))
+                .when(notificationService).sendExpirationNotification("Milk", TODAY.minusDays(1));
+
+        assertThrows(NestedServletException.class,
+                () -> mockMvc.perform(post("/orders/{orderId}/processOrder", order.getId())));
+
+        assertStock(cable, 3);
+        assertStock(expiredMilk, 4);
+        verify(notificationService).sendExpirationNotification("Milk", TODAY.minusDays(1));
+        verifyNoMoreInteractions(notificationService);
+    }
+
+    @Test
     void emptyOrderReturnsIdWithoutNotifications() throws Exception {
         Order order = saveOrder();
 
@@ -184,11 +200,10 @@ class MyControllerIntegrationTests {
     }
 
     @Test
-    void missingOrderPropagatesUnhandledException() {
-        NestedServletException exception = assertThrows(NestedServletException.class,
-                () -> mockMvc.perform(post("/orders/{orderId}/processOrder", Long.MAX_VALUE)));
+    void missingOrderReturnsNotFound() throws Exception {
+        mockMvc.perform(post("/orders/{orderId}/processOrder", Long.MAX_VALUE))
+                .andExpect(status().isNotFound());
 
-        assertInstanceOf(NoSuchElementException.class, exception.getCause());
         verifyNoInteractions(notificationService);
     }
 
@@ -202,7 +217,7 @@ class MyControllerIntegrationTests {
 
     private Order saveOrder(Product... products) {
         productRepository.saveAll(Arrays.asList(products));
-        return orderRepository.save(new Order(null, new HashSet<>(Arrays.asList(products))));
+        return orderRepository.save(new Order(null, new LinkedHashSet<>(Arrays.asList(products))));
     }
 
     private void processOrder(Order order) throws Exception {

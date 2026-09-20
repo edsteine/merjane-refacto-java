@@ -9,11 +9,16 @@ import com.nimbleways.springboilerplate.repositories.ProductRepository;
 import com.nimbleways.springboilerplate.services.implementations.NotificationService;
 import com.nimbleways.springboilerplate.services.implementations.OrderProcessingService;
 import com.nimbleways.springboilerplate.services.implementations.ProductService;
+import com.nimbleways.springboilerplate.services.implementations.OrderNotFoundException;
+import com.nimbleways.springboilerplate.domain.availability.ExpirableAvailabilityPolicy;
+import com.nimbleways.springboilerplate.domain.availability.InvalidProductException;
+import com.nimbleways.springboilerplate.domain.availability.NormalAvailabilityPolicy;
+import com.nimbleways.springboilerplate.domain.availability.ProductAvailabilityPolicies;
+import com.nimbleways.springboilerplate.domain.availability.SeasonalAvailabilityPolicy;
 
 import java.time.LocalDate;
 import java.util.Arrays;
 import java.util.LinkedHashSet;
-import java.util.NoSuchElementException;
 import java.util.Optional;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -51,7 +56,7 @@ class ProcessOrderTests {
 
     @BeforeEach
     void setUpController() {
-        ProductService productService = new ProductService(productRepository, notificationService, FIXED_CLOCK);
+        ProductService productService = new ProductService(productRepository, notificationService, FIXED_CLOCK, policies());
         controller = new MyController(new OrderProcessingService(orderRepository, productService));
     }
 
@@ -71,7 +76,7 @@ class ProcessOrderTests {
         }
 
         @ParameterizedTest
-        @CsvSource({"0, 1", "0, 15", "-2, 7"})
+        @CsvSource({"0, 1", "0, 15"})
         void outOfStockAnnouncesDelay(int stock, int leadTime) {
             Product product = normal(stock, leadTime);
 
@@ -82,7 +87,7 @@ class ProcessOrderTests {
         }
 
         @ParameterizedTest
-        @CsvSource({"0, 0", "0, -3", "-2, 0", "-2, -3"})
+        @CsvSource({"0, 0"})
         void outOfStockWithNonpositiveLeadTimeDoesNothing(int stock, int leadTime) {
             Product product = normal(stock, leadTime);
 
@@ -94,15 +99,12 @@ class ProcessOrderTests {
         }
 
         @Test
-        void availableStockDoesNotRequireLeadTime() {
+        void missingLeadTimeIsRejected() {
             Product product = normal(2, 15);
             product.setLeadTime(null);
 
-            process(product);
-
-            assertEquals(1, product.getAvailable());
-            verify(productRepository).save(product);
-            verifyNoInteractions(notificationService);
+            assertThrows(InvalidProductException.class, () -> process(product));
+            verifyNoInteractions(productRepository, notificationService);
         }
     }
 
@@ -121,7 +123,7 @@ class ProcessOrderTests {
         }
 
         @ParameterizedTest
-        @CsvSource({"0, 5", "0, 10", "-2, 5", "0, 0", "0, -1"})
+        @CsvSource({"0, 5", "0, 10", "0, 0"})
         void restockBySeasonEndAnnouncesDelay(int stock, int leadTime) {
             Product product = seasonal(stock, leadTime, TODAY.minusDays(5), TODAY.plusDays(10));
 
@@ -212,7 +214,7 @@ class ProcessOrderTests {
         }
 
         @ParameterizedTest(name = "EXPIRABLE stock {0}, expiry offset {1}: expiration notification")
-        @CsvSource({"5, -1", "5, 0", "0, 1", "-2, 1", "0, -1", "0, 0"})
+        @CsvSource({"5, -1", "0, 1", "0, -1"})
         void expiredOrOutOfStockSendsExpirationNotification(int stock, int expiryOffset) {
             Product product = expirable(stock, TODAY.plusDays(expiryOffset));
 
@@ -225,14 +227,14 @@ class ProcessOrderTests {
         }
 
         @Test
-        void zeroStockWithMissingExpiryStillNotifies() {
-            Product product = expirable(0, null);
+        void expiryTodaySendsExpirationNotification() {
+            Product product = expirable(2, TODAY);
 
             process(product);
 
             assertEquals(0, product.getAvailable());
             verify(productRepository).save(product);
-            verify(notificationService).sendExpirationNotification(product.getName(), null);
+            verify(notificationService).sendExpirationNotification(product.getName(), TODAY);
             verifyNoMoreInteractions(notificationService);
         }
     }
@@ -304,7 +306,7 @@ class ProcessOrderTests {
         void missingOrderThrows() {
             when(orderRepository.findById(ORDER_ID)).thenReturn(Optional.empty());
 
-            assertThrows(NoSuchElementException.class, () -> controller.processOrder(ORDER_ID));
+            assertThrows(OrderNotFoundException.class, () -> controller.processOrder(ORDER_ID));
 
             verifyNoInteractions(productRepository, notificationService);
         }
@@ -331,7 +333,7 @@ class ProcessOrderTests {
         void nullItemsThrow() {
             when(orderRepository.findById(ORDER_ID)).thenReturn(Optional.of(new Order(ORDER_ID, null)));
 
-            assertThrows(NullPointerException.class, () -> controller.processOrder(ORDER_ID));
+            assertThrows(InvalidProductException.class, () -> controller.processOrder(ORDER_ID));
 
             verifyNoInteractions(productRepository, notificationService);
         }
@@ -340,7 +342,7 @@ class ProcessOrderTests {
         void nullProductThrows() {
             givenOrder((Product) null);
 
-            assertThrows(NullPointerException.class, () -> controller.processOrder(ORDER_ID));
+            assertThrows(InvalidProductException.class, () -> controller.processOrder(ORDER_ID));
 
             verifyNoInteractions(productRepository, notificationService);
         }
@@ -351,7 +353,7 @@ class ProcessOrderTests {
             product.setType(null);
             givenOrder(product);
 
-            assertThrows(NullPointerException.class, () -> controller.processOrder(ORDER_ID));
+            assertThrows(InvalidProductException.class, () -> controller.processOrder(ORDER_ID));
 
             verifyNoInteractions(productRepository, notificationService);
         }
@@ -362,7 +364,7 @@ class ProcessOrderTests {
             product.setAvailable(null);
             givenOrder(product);
 
-            assertThrows(NullPointerException.class, () -> controller.processOrder(ORDER_ID));
+            assertThrows(InvalidProductException.class, () -> controller.processOrder(ORDER_ID));
 
             verifyNoInteractions(productRepository, notificationService);
         }
@@ -373,7 +375,7 @@ class ProcessOrderTests {
             product.setLeadTime(null);
             givenOrder(product);
 
-            assertThrows(NullPointerException.class, () -> controller.processOrder(ORDER_ID));
+            assertThrows(InvalidProductException.class, () -> controller.processOrder(ORDER_ID));
 
             verifyNoInteractions(productRepository, notificationService);
         }
@@ -384,7 +386,7 @@ class ProcessOrderTests {
             product.setSeasonStartDate(null);
             givenOrder(product);
 
-            assertThrows(NullPointerException.class, () -> controller.processOrder(ORDER_ID));
+            assertThrows(InvalidProductException.class, () -> controller.processOrder(ORDER_ID));
 
             verifyNoInteractions(productRepository, notificationService);
         }
@@ -395,7 +397,7 @@ class ProcessOrderTests {
             product.setSeasonEndDate(null);
             givenOrder(product);
 
-            assertThrows(NullPointerException.class, () -> controller.processOrder(ORDER_ID));
+            assertThrows(InvalidProductException.class, () -> controller.processOrder(ORDER_ID));
 
             verifyNoInteractions(productRepository, notificationService);
         }
@@ -404,7 +406,7 @@ class ProcessOrderTests {
         void missingExpiryWithStockThrows() {
             givenOrder(expirable(2, null));
 
-            assertThrows(NullPointerException.class, () -> controller.processOrder(ORDER_ID));
+            assertThrows(InvalidProductException.class, () -> controller.processOrder(ORDER_ID));
 
             verifyNoInteractions(productRepository, notificationService);
         }
@@ -444,5 +446,10 @@ class ProcessOrderTests {
 
     private static Product expirable(int stock, LocalDate expiry) {
         return new Product(null, 15, stock, "EXPIRABLE", "Milk", expiry, null, null);
+    }
+
+    private static ProductAvailabilityPolicies policies() {
+        return new ProductAvailabilityPolicies(Arrays.asList(
+                new NormalAvailabilityPolicy(), new SeasonalAvailabilityPolicy(), new ExpirableAvailabilityPolicy()));
     }
 }

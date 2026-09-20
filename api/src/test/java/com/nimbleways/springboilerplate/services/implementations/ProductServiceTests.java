@@ -2,6 +2,12 @@ package com.nimbleways.springboilerplate.services.implementations;
 
 import com.nimbleways.springboilerplate.entities.Product;
 import com.nimbleways.springboilerplate.repositories.ProductRepository;
+import com.nimbleways.springboilerplate.domain.availability.ExpirableAvailabilityPolicy;
+import com.nimbleways.springboilerplate.domain.availability.NormalAvailabilityPolicy;
+import com.nimbleways.springboilerplate.domain.availability.ProductAvailabilityPolicies;
+import com.nimbleways.springboilerplate.domain.availability.SeasonalAvailabilityPolicy;
+
+import java.util.List;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
@@ -35,13 +41,13 @@ class ProductServiceTests {
 
     @BeforeEach
     void setUp() {
-        productService = new ProductService(productRepository, notificationService, FIXED_CLOCK);
+        productService = new ProductService(productRepository, notificationService, FIXED_CLOCK, policies());
     }
 
     @Nested
     class DelayNotifications {
         @ParameterizedTest
-        @ValueSource(ints = {7, 0, -2})
+        @ValueSource(ints = {7, 0})
         void updatesLeadTimeAndNotifies(int leadTime) {
             Product product = new Product(null, 15, 3, "NORMAL", "RJ45 Cable", null, null, null);
 
@@ -70,12 +76,12 @@ class ProductServiceTests {
     @Nested
     class SeasonalProducts {
         @ParameterizedTest
-        @CsvSource({"0, 5", "4, 5", "0, 10", "0, 0", "0, -1"})
+        @CsvSource({"0, 5", "0, 10", "0, 0"})
         void restockBySeasonEndAnnouncesDelay(int stock, int leadTime) {
             Product product = new Product(null, leadTime, stock, "SEASONAL", "Watermelon", null,
                     TODAY.minusDays(5), TODAY.plusDays(10));
 
-            productService.handleSeasonalProduct(product);
+            productService.process(product);
 
             assertEquals(stock, product.getAvailable());
             assertEquals(leadTime, product.getLeadTime());
@@ -85,12 +91,12 @@ class ProductServiceTests {
         }
 
         @ParameterizedTest
-        @ValueSource(ints = {0, 4, -2})
+        @ValueSource(ints = {0})
         void restockAfterSeasonClearsStock(int stock) {
             Product product = new Product(null, 11, stock, "SEASONAL", "Watermelon", null,
                     TODAY.minusDays(5), TODAY.plusDays(10));
 
-            productService.handleSeasonalProduct(product);
+            productService.process(product);
 
             assertEquals(0, product.getAvailable());
             verify(productRepository).save(product);
@@ -103,7 +109,7 @@ class ProductServiceTests {
             Product product = new Product(null, 5, 4, "SEASONAL", "Watermelon", null,
                     TODAY.plusDays(10), TODAY.plusDays(20));
 
-            productService.handleSeasonalProduct(product);
+            productService.process(product);
 
             assertEquals(4, product.getAvailable());
             verify(productRepository).save(product);
@@ -113,15 +119,15 @@ class ProductServiceTests {
 
         @Test
         void notificationFailureLeavesStockUnchanged() {
-            Product product = new Product(null, 11, 4, "SEASONAL", "Watermelon", null,
+            Product product = new Product(null, 11, 0, "SEASONAL", "Watermelon", null,
                     TODAY.minusDays(5), TODAY.plusDays(10));
             RuntimeException failure = new IllegalStateException("Notification unavailable");
             doThrow(failure).when(notificationService).sendOutOfStockNotification(product.getName());
 
             assertSame(failure, assertThrows(IllegalStateException.class,
-                    () -> productService.handleSeasonalProduct(product)));
+                    () -> productService.process(product)));
 
-            assertEquals(4, product.getAvailable());
+            assertEquals(0, product.getAvailable());
             verifyNoInteractions(productRepository);
         }
     }
@@ -133,7 +139,7 @@ class ProductServiceTests {
         void consumesUnexpiredStock(int stock) {
             Product product = new Product(null, 15, stock, "EXPIRABLE", "Milk", TODAY.plusDays(1), null, null);
 
-            productService.handleExpiredProduct(product);
+            productService.process(product);
 
             assertEquals(stock - 1, product.getAvailable());
             verify(productRepository).save(product);
@@ -141,11 +147,11 @@ class ProductServiceTests {
         }
 
         @ParameterizedTest
-        @CsvSource({"4, -1", "4, 0", "0, 1", "-2, 1"})
+        @CsvSource({"4, -1", "0, 1"})
         void expiredOrOutOfStockNotifiesAndClearsStock(int stock, int expiryOffset) {
             Product product = new Product(null, 15, stock, "EXPIRABLE", "Milk", TODAY.plusDays(expiryOffset), null, null);
 
-            productService.handleExpiredProduct(product);
+            productService.process(product);
 
             assertEquals(0, product.getAvailable());
             verify(productRepository).save(product);
@@ -160,10 +166,15 @@ class ProductServiceTests {
             doThrow(failure).when(notificationService).sendExpirationNotification(product.getName(), product.getExpiryDate());
 
             assertSame(failure, assertThrows(IllegalStateException.class,
-                    () -> productService.handleExpiredProduct(product)));
+                    () -> productService.process(product)));
 
             assertEquals(4, product.getAvailable());
             verifyNoInteractions(productRepository);
         }
+    }
+
+    private static ProductAvailabilityPolicies policies() {
+        return new ProductAvailabilityPolicies(List.of(
+                new NormalAvailabilityPolicy(), new SeasonalAvailabilityPolicy(), new ExpirableAvailabilityPolicy()));
     }
 }

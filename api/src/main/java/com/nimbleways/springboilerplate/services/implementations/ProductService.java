@@ -4,10 +4,9 @@ import java.time.Clock;
 import java.time.LocalDate;
 
 import com.nimbleways.springboilerplate.domain.availability.AvailabilityDecision;
+import com.nimbleways.springboilerplate.domain.availability.InvalidProductException;
 import com.nimbleways.springboilerplate.domain.availability.ProductAvailabilityPolicies;
 import com.nimbleways.springboilerplate.domain.availability.ProductAvailabilityPolicy;
-import com.nimbleways.springboilerplate.domain.availability.ExpirableAvailabilityPolicy;
-import com.nimbleways.springboilerplate.domain.availability.SeasonalAvailabilityPolicy;
 import org.springframework.stereotype.Service;
 
 import com.nimbleways.springboilerplate.entities.Product;
@@ -20,11 +19,12 @@ public class ProductService {
     private final Clock clock;
     private final ProductAvailabilityPolicies policies;
 
-    public ProductService(ProductRepository productRepository, NotificationService notificationService, Clock clock) {
+    public ProductService(ProductRepository productRepository, NotificationService notificationService, Clock clock,
+            ProductAvailabilityPolicies policies) {
         this.pr = productRepository;
         this.ns = notificationService;
         this.clock = clock;
-        this.policies = new ProductAvailabilityPolicies();
+        this.policies = policies;
     }
 
     public void notifyDelay(int leadTime, Product p) {
@@ -34,20 +34,13 @@ public class ProductService {
     }
 
     public void process(Product product) {
+        if (product == null || product.getType() == null) {
+            throw new InvalidProductException("type is required");
+        }
         ProductAvailabilityPolicy policy = policies.forType(product.getType());
         if (policy != null) {
             apply(product, policy.decide(product, LocalDate.now(clock)));
         }
-    }
-
-    public void handleSeasonalProduct(Product p) {
-        LocalDate today = LocalDate.now(clock);
-        AvailabilityDecision decision = new SeasonalAvailabilityPolicy().decideWhenUnavailable(p, today);
-        apply(p, decision);
-    }
-
-    public void handleExpiredProduct(Product p) {
-        apply(p, new ExpirableAvailabilityPolicy().decide(p, LocalDate.now(clock)));
     }
 
     private void apply(Product product, AvailabilityDecision decision) {
