@@ -7,6 +7,7 @@ import com.nimbleways.springboilerplate.entities.Product;
 import com.nimbleways.springboilerplate.repositories.OrderRepository;
 import com.nimbleways.springboilerplate.repositories.ProductRepository;
 import com.nimbleways.springboilerplate.services.implementations.NotificationService;
+import com.nimbleways.springboilerplate.services.implementations.OrderProcessingService;
 import com.nimbleways.springboilerplate.services.implementations.ProductService;
 
 import java.time.LocalDate;
@@ -51,7 +52,7 @@ class ProcessOrderTests {
     @BeforeEach
     void setUpController() {
         ProductService productService = new ProductService(productRepository, notificationService, FIXED_CLOCK);
-        controller = new MyController(productService, productRepository, orderRepository, FIXED_CLOCK);
+        controller = new MyController(new OrderProcessingService(orderRepository, productService));
     }
 
     @Nested
