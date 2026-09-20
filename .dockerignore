@@ -1,0 +1,6 @@
+.git
+.idea
+.mvn
+**/target/*
+!api/target/springboilerplate-0.0.1-SNAPSHOT.jar
+*.iml

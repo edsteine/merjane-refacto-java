@@ -1,0 +1,104 @@
+version: '3'
+
+vars:
+  MVN: sh ./mvnw --batch-mode --no-transfer-progress
+
+tasks:
+  default:
+    desc: List available commands
+    cmds:
+      - task --list
+
+  versions:
+    desc: Show the Java and Maven versions used by the wrapper
+    dir: api
+    cmds:
+      - '{{.MVN}} --version'
+
+  clean:
+    desc: Remove build output
+    dir: api
+    cmds:
+      - '{{.MVN}} clean'
+
+  compile:
+    desc: Compile application and test sources
+    dir: api
+    cmds:
+      - '{{.MVN}} test-compile {{.CLI_ARGS}}'
+
+  test:
+    desc: Run unit tests
+    dir: api
+    cmds:
+      - '{{.MVN}} test {{.CLI_ARGS}}'
+
+  test:integration:
+    desc: Run unit and integration tests
+    dir: api
+    cmds:
+      - '{{.MVN}} integration-test {{.CLI_ARGS}}'
+
+  verify:
+    desc: Clean build, all tests, JaCoCo coverage, and PMD checks
+    aliases: [test:all, coverage]
+    dir: api
+    cmds:
+      - '{{.MVN}} clean verify {{.CLI_ARGS}}'
+
+  build:
+    desc: Package the executable JAR with unit tests
+    dir: api
+    cmds:
+      - '{{.MVN}} package {{.CLI_ARGS}}'
+
+  lint:
+    desc: Run the configured PMD checks
+    dir: api
+    cmds:
+      - '{{.MVN}} pmd:check {{.CLI_ARGS}}'
+
+  deps:
+    desc: Show the Maven dependency tree
+    dir: api
+    cmds:
+      - '{{.MVN}} dependency:tree {{.CLI_ARGS}}'
+
+  run:
+    desc: Run the API locally with a temporary H2 schema
+    dir: api
+    cmds:
+      - '{{.MVN}} spring-boot:run -Dspring-boot.run.arguments=--spring.jpa.hibernate.ddl-auto=create-drop {{.CLI_ARGS}}'
+
+  docker:build:
+    desc: Package the application and build the Docker image
+    cmds:
+      - task build
+      - docker build -t merjane-inventory .
+
+  docker:validate:
+    desc: Validate the Docker Compose configuration
+    cmds:
+      - docker compose config --quiet
+
+  docker:up:
+    desc: Run the API in Docker Compose
+    cmds:
+      - task build
+      - docker compose up --build
+
+  docker:up:detach:
+    desc: Run the API in Docker Compose in the background
+    cmds:
+      - task build
+      - docker compose up --build --detach
+
+  docker:logs:
+    desc: Follow Docker Compose application logs
+    cmds:
+      - docker compose logs --follow app
+
+  docker:down:
+    desc: Stop the Docker Compose stack
+    cmds:
+      - docker compose down

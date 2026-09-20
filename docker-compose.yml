@@ -1,0 +1,9 @@
+services:
+  app:
+    build:
+      context: .
+    image: merjane-inventory:local
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    environment:
+      ENABLE_SWAGGER: "true"
