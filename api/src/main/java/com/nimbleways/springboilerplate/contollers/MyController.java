@@ -7,12 +7,12 @@ import com.nimbleways.springboilerplate.repositories.OrderRepository;
 import com.nimbleways.springboilerplate.repositories.ProductRepository;
 import com.nimbleways.springboilerplate.services.implementations.ProductService;
 
+import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -23,14 +23,18 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/orders")
 public class MyController {
-    @Autowired
-    private ProductService ps;
+    private final ProductService ps;
+    private final ProductRepository pr;
+    private final OrderRepository or;
+    private final Clock clock;
 
-    @Autowired
-    private ProductRepository pr;
-
-    @Autowired
-    private OrderRepository or;
+    public MyController(ProductService productService, ProductRepository productRepository,
+            OrderRepository orderRepository, Clock clock) {
+        this.ps = productService;
+        this.pr = productRepository;
+        this.or = orderRepository;
+        this.clock = clock;
+    }
 
     @PostMapping("{orderId}/processOrder")
     @ResponseStatus(HttpStatus.OK)
@@ -53,7 +57,7 @@ public class MyController {
                 }
             } else if (p.getType().equals("SEASONAL")) {
                 // Add new season rules
-                if ((LocalDate.now().isAfter(p.getSeasonStartDate()) && LocalDate.now().isBefore(p.getSeasonEndDate())
+                if ((LocalDate.now(clock).isAfter(p.getSeasonStartDate()) && LocalDate.now(clock).isBefore(p.getSeasonEndDate())
                         && p.getAvailable() > 0)) {
                     p.setAvailable(p.getAvailable() - 1);
                     pr.save(p);
@@ -61,7 +65,7 @@ public class MyController {
                     ps.handleSeasonalProduct(p);
                 }
             } else if (p.getType().equals("EXPIRABLE")) {
-                if (p.getAvailable() > 0 && p.getExpiryDate().isAfter(LocalDate.now())) {
+                if (p.getAvailable() > 0 && p.getExpiryDate().isAfter(LocalDate.now(clock))) {
                     p.setAvailable(p.getAvailable() - 1);
                     pr.save(p);
                 } else {
